@@ -192,6 +192,7 @@ PUB void flow_context_terminate(flow_c * context);
 
 PUB void flow_context_destroy(flow_c * c); // Don't pass this a pointer on the stack! use begin/end terminate
 
+PUB bool flow_context_set_error_get_message_buffer_info(flow_c * context, flow_status_code code, char * * buffer,  size_t * buffer_size);
 PUB int64_t flow_context_error_and_stacktrace(flow_c * c, char * buffer, size_t buffer_size, bool full_file_path);
 PUB int64_t flow_context_error_message(flow_c * c, char * buffer, size_t buffer_size);
 PUB int64_t flow_context_stacktrace(flow_c * c, char * buffer, size_t buffer_size, bool full_file_path);

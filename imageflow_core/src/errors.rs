@@ -7,26 +7,29 @@ use std::io::Write;
 use std::io;
 use std::cmp;
 use num::FromPrimitive;
+use ::ffi;
+use std::ffi::CStr;
+use std::ptr;
 
 #[macro_export]
 macro_rules! here {
     () => (
-        ::CodeLocation{ line: line!(), column: column!(), file: file!(), module: module_path!()}
+        ::CodeLocation{ line: line!(), column: column!(), file: file!()}
     );
 }
 #[macro_export]
 macro_rules! loc {
     () => (
-        concat!(file!(), ":", line!(), ":", column!(), " in ", module_path!())
+        concat!(file!(), ":", line!(), ":", column!())
     );
     ($msg:expr) => (
-        concat!($msg, " at\n", file!(), ":", line!(), ":", column!(), " in ", module_path!())
+        concat!($msg, " at\n", file!(), ":", line!(), ":", column!())
     );
 }
 #[macro_export]
 macro_rules! nerror {
     ($kind:expr) => (
-        NodeError{
+        ::NodeError{
             kind: $kind,
             message: format!("NodeError {:?}", $kind),
             at: ::smallvec::SmallVec::new(),
@@ -34,7 +37,7 @@ macro_rules! nerror {
         }.at(here!())
     );
     ($kind:expr, $fmt:expr) => (
-        NodeError{
+        ::NodeError{
             kind: $kind,
             message:  format!(concat!("NodeError {:?}: ",$fmt ), $kind,),
             at: ::smallvec::SmallVec::new(),
@@ -42,7 +45,7 @@ macro_rules! nerror {
         }.at(here!())
     );
     ($kind:expr, $fmt:expr, $($arg:tt)*) => (
-        NodeError{
+        ::NodeError{
             kind: $kind,
             message:  format!(concat!("NodeError {:?}: ", $fmt), $kind, $($arg)*),
             at: ::smallvec::SmallVec::new(),
@@ -50,10 +53,11 @@ macro_rules! nerror {
         }.at(here!())
     );
 }
+
 #[macro_export]
 macro_rules! unimpl {
     () => (
-        NodeError{
+        ::NodeError{
             kind: ::ErrorKind::MethodNotImplemented,
             message: String::new(),
             at: ::smallvec::SmallVec::new(),
@@ -62,10 +66,55 @@ macro_rules! unimpl {
     );
 }
 
-pub type Result<T> = std::result::Result<T, FlowError>;
-pub type NResult<T> = ::std::result::Result<T, NodeError>;
 
+#[macro_export]
+macro_rules! cerror {
+    ($context:expr) => {{
+        let cerr = $ context.c_error().require();
+        ::NodeError{
+            kind: ::ErrorKind::CError(cerr.status()),
+            message: cerr.into_string(),
+            at: ::smallvec::SmallVec::new(),
+            node: None
+        }.at(here ! ())
+    }};
+    ($context:expr, $fmt:expr) => {{
+        let cerr = $context.c_error().require();
+        ::NodeError{
+            kind: ::ErrorKind::CError(cerr.status()),
+            message: format!(concat!($fmt, ": {}"), cerr.into_string()),
+            at: ::smallvec::SmallVec::new(),
+            node:None
+        }.at(here ! ())
+    }};
+    ($context:expr, $fmt:expr, $($arg:tt)*) => {{
+        let cerr = $context.c_error().require();
+        ::NodeError{
+            kind: ::ErrorKind::CError(cerr.status()),
+            message: format!(concat!($fmt, ": {}"), $($arg)*, cerr.into_string()),
+            at: ::smallvec::SmallVec::new(),
+            node:None
+        }.at(here ! ())
+    }};
+}
 
+#[macro_export]
+macro_rules! err_oom {
+    () => (
+        ::NodeError{
+            kind: ::ErrorKind::AllocationFailed,
+            message: String::new(),
+            at: ::smallvec::SmallVec::new(),
+            node: None
+        }.at(here!())
+    );
+}
+
+pub type Result<T> = std::result::Result<T, NodeError>;
+
+trait CategorizedError{
+    fn category(&self) -> ErrorCategory;
+}
 
 #[repr(C)]
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
@@ -109,10 +158,56 @@ pub enum ErrorCategory{
     /// A valid license is needed for the specified job
     LicenseError,
     /// The category of the error is unknown
-    Unknown
+    Unknown,
+    /// A custom error defined by a third-party plugin
+    Custom
 
+    // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    // NOTE - safe use of transmute in from_i32 requires that there be no numbering gaps in this list
+    // Also keep ErrorCategory::last() up-to-date
+    // !!!!!!!!!!!!!!!!!!!!!!!!!!
 }
 impl ErrorCategory{
+
+    pub fn last() -> ErrorCategory {
+        ErrorCategory::Unknown
+    }
+    fn from_i32(v: i32) -> Option<ErrorCategory>{
+        if v >= 0 && v <= ErrorCategory::last() as i32 {
+            Some( unsafe { ::std::mem::transmute(v) })
+        }else {
+            None
+        }
+
+    }
+
+    pub fn from_c_status(status: i32) -> Option<ErrorCategory>{
+        if let Some(v) = ErrorCategory::from_i32(status - 200){
+            Some(v)
+        }else {
+            match status {
+                0 => Some(ErrorCategory::Ok),
+                10 => Some(ErrorCategory::OutOfMemory),
+                20 => Some(ErrorCategory::IoError),
+                30 | 40 | 50 | 51 | 52 | 53 | 54 | 61 => Some(ErrorCategory::InternalError),
+                60 => Some(ErrorCategory::ImageMalformed),
+                _ => None
+            }
+        }
+    }
+
+    pub fn to_c_status(&self) -> i32{
+        match *self{
+            ErrorCategory::Ok => 0,
+            ErrorCategory::Custom => 1025,
+            ErrorCategory::Unknown => 1024,
+            ErrorCategory::OutOfMemory => 10,
+            ErrorCategory::IoError => 20,
+            ErrorCategory::InternalError => 30,
+            ErrorCategory::ImageMalformed => 60,
+            other => 200 + *self as i32
+        }
+    }
     pub fn exit_code(&self) -> i32{
         match *self {
             ErrorCategory::ArgumentInvalid |
@@ -128,6 +223,7 @@ impl ErrorCategory{
             ErrorCategory::UpstreamTimeout => 69, //EX_UNAVAILABLE
             ErrorCategory::InternalError  |
             ErrorCategory::NoSolutionFound  |
+            ErrorCategory::Custom |
             ErrorCategory::Unknown => 70, //EX_SOFTWARE
             ErrorCategory::OutOfMemory => 71,// EX_TEMPFAIL 75 or EX_OSERR   71 ?
             ErrorCategory::IoError => 74, //EX_IOERR
@@ -158,29 +254,12 @@ impl ErrorCategory{
             ErrorCategory::InternalError |
             ErrorCategory::Unknown |
             ErrorCategory::NoSolutionFound |
+            ErrorCategory::Custom |
             ErrorCategory::IoError => 500,
 
             ErrorCategory::UpstreamError => 502,
             ErrorCategory::OutOfMemory => 503,
             ErrorCategory::UpstreamTimeout => 504,
-        }
-    }
-    pub fn from_c_status_code(status: i32) -> ErrorCategory{
-        match status{
-            0 => ErrorCategory::Ok,
-            10 => ErrorCategory::OutOfMemory,
-            20 => ErrorCategory::IoError,
-            30 | 40 | 50 | 51 | 52 | 53 | 54 | 61 => ErrorCategory::InternalError,
-            60 => ErrorCategory::ImageMalformed,
-            c if c > 200 && c <= ErrorCategory::LicenseError as i32 + 200 => unsafe { ::std::mem::transmute(c - 200) },
-            other => ErrorCategory::Unknown
-        }
-    }
-    pub fn to_c_status_code(&self) -> i32{
-        match *self{
-            ErrorCategory::Ok => 0,
-            ErrorCategory::Unknown => 1024,
-            other => 200 + *self as i32
         }
     }
 
@@ -213,8 +292,7 @@ impl OutwardErrorBuffer{
     }
     pub fn try_set_error(&mut self, error: NodeError) -> bool{
         if self.last_error.is_none() {
-            // TODO: self.category = error.category();
-            self.category = ErrorCategory::InternalError;
+            self.category = error.category();
             self.last_error = Some(error);
             true
         }else{
@@ -284,98 +362,72 @@ impl std::fmt::Display for OutwardErrorBuffer {
 }
 
 
+
 #[derive(Debug, Clone, PartialEq)]
-pub struct FlowErr {
-    pub code: i32,
-    pub message_and_stack: String,
+pub struct CError {
+    status: CStatus,
+    message_and_stack: String
 }
-
-
-
-
-
-#[repr(C)]
-#[derive(Copy,Clone,Debug, PartialEq)]
-pub enum FlowStatusCode {
-    NoError = 0,
-    OutOfMemory = 10,
-    IOError = 20,
-    InvalidInternalState = 30,
-    NotImplemented = 40,
-    InvalidArgument = 50,
-    NullArgument = 51,
-    InvalidDimensions = 52,
-    UnsupportedPixelFormat = 53,
-    ItemDoesNotExist = 54,
-
-    ImageDecodingFailed = 60,
-    ImageEncodingFailed = 61,
-
-
-    OtherError = 1024,
-    // FIXME: FirstUserDefinedError is 1025 in C but it conflicts with __LastLibraryError
-    // ___LastLibraryError,
-    FirstUserDefinedError = 1025,
-    LastUserDefinedError = 2147483647,
-}
-
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum FlowError {
-    GraphCyclic,
-    Oom,
-    Err(FlowErr),
-    ErrNotImpl,
-    NodeError(NodeError)
-}
-
-impl From<NodeError> for FlowError{
-    fn from(e: NodeError) -> Self{
-        FlowError::NodeError(e)
+impl CategorizedError for CError{
+    fn category(&self) -> ErrorCategory {
+        self.status().category()
     }
 }
 
-impl std::fmt::Display for FlowError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if let &FlowError::NodeError(ref e) = self {
-            write!(f, "{}", e)
-        } else {
-            write!(f, "{:#?}", self)
-        }
-
+impl CError{
+    pub fn status(&self) -> CStatus{
+        self.status
     }
+    pub fn into_string(self) -> String{
+        self.message_and_stack
+    }
+    pub fn new(status: CStatus, message_and_stack: String) -> CError{
+        CError{ status: status, message_and_stack: message_and_stack}
+    }
+    pub fn from_status(status: CStatus) -> CError{
+        CError{ status: status, message_and_stack: String::new()}
+    }
+
 }
 
-
-impl std::error::Error for FlowError{
-    fn description(&self) -> &str{
-        "std::error::Error for FlowError not implemented"
-    }
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum CStatus{
+    Custom(i32),
+    Unknown(i32),
+    ErrorMismatch,
+    Cat(ErrorCategory),
 }
-
-impl FlowError{
-    pub fn to_cow(&self) -> Cow<'static, str> {
-        match *self {
-            FlowError::Err(ref e) => {
-                Cow::from(format!("Error {} {}\n", e.code, e.message_and_stack))
-            }
-            ref other => {
-                Cow::from(format!("{:?}", other))
-            }
+impl CategorizedError for CStatus{
+    fn category(&self) -> ErrorCategory {
+        match self{
+            &CStatus::Custom(_) => ErrorCategory::Custom,
+            &CStatus::Unknown(_) => ErrorCategory::Unknown,
+            &CStatus::ErrorMismatch => ErrorCategory::InternalError,
+            &CStatus::Cat(c) => c
         }
     }
-    pub fn panic_time(&self){
-        panic!("{}",self.to_cow());
+}
+impl From<i32> for CStatus{
+    fn from(v: i32) -> CStatus{
+        if let Some(cat) = ErrorCategory::from_c_status(v){
+            CStatus::Cat(cat)
+        }else if v > 1024 {
+            CStatus::Custom(v)
+        }else if v == 90 {
+            CStatus::ErrorMismatch
+        }else{
+            CStatus::Unknown(v)
+        }
     }
-    pub fn panic_with(&self, message: &str){
-        panic!("{}\n{}", message, self.to_cow());
-    }
-
-    pub fn write_to_buf(&self, buf: &mut ::context::ErrorBuffer) -> bool{
-        buf.abi_raise_error_c_style(FlowStatusCode::NotImplemented as i32, None, None, None, None)
-    }
-    pub unsafe fn write_to_context_ptr(&self, c: *const Context) {
-        self.write_to_buf(&mut *(&*c).error_mut());
+}
+impl CStatus {
+    pub fn to_i32(&self) -> i32{
+        match self{
+            &CStatus::Custom(v) => v,
+            &CStatus::Unknown(v) => v,
+            &CStatus::ErrorMismatch => 90,
+            &CStatus::Cat(c) => c.to_c_status()
+        }
     }
 }
 
@@ -383,34 +435,58 @@ impl FlowError{
 
 
 
-#[derive(Debug,  Clone, PartialEq)]
+
+#[derive(Debug,  Clone, PartialEq, Eq)]
 pub enum ErrorKind{
+    AllocationFailed,
+
     GraphCyclic,
-    ContextInvalid,
-    Oom,
-    ErrNotImpl,
+    InvalidNodeConnections,
+
     NullArgument,
     InvalidArgument,
-    FailedBorrow,
-    AllocationFailed,
-    NodeParamsMismatch,
-    BitmapPointerNull,
     InvalidCoordinates,
     InvalidNodeParams,
+
+    FailedBorrow,
+    NodeParamsMismatch,
+    BitmapPointerNull,
     MethodNotImplemented,
     ValidationNotImplemented,
-    InvalidNodeConnections,
     InvalidOperation,
     InvalidState,
-    CError(FlowErr)
-
+    Category(ErrorCategory),
+    CError(CStatus)
 }
+impl CategorizedError for ErrorKind{
+    fn category(&self) -> ErrorCategory{
+        match self{
+            &ErrorKind::AllocationFailed => ErrorCategory::OutOfMemory,
+
+            &ErrorKind::GraphCyclic |
+            &ErrorKind::InvalidNodeConnections => ErrorCategory::GraphInvalid,
+            &ErrorKind::NullArgument |
+            &ErrorKind::InvalidArgument |
+            &ErrorKind::InvalidCoordinates |
+            &ErrorKind::InvalidNodeParams => ErrorCategory::ArgumentInvalid,
+            &ErrorKind::FailedBorrow |
+            &ErrorKind::NodeParamsMismatch |
+            &ErrorKind::BitmapPointerNull |
+            &ErrorKind::MethodNotImplemented |
+            &ErrorKind::ValidationNotImplemented |
+            &ErrorKind::InvalidOperation |
+            &ErrorKind::InvalidState => ErrorCategory::InternalError,
+            &ErrorKind::CError(ref e) => e.category(),
+            &ErrorKind::Category(c) => c
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct CodeLocation{
     pub line: u32,
     pub column: u32,
     pub file: &'static str,
-    pub module: &'static str
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -421,16 +497,10 @@ pub struct NodeError{
     pub node: Option<::flow::definitions::NodeDebugInfo>
 }
 
-
 impl ::std::error::Error for NodeError {
     fn description(&self) -> &str {
-        if self.message.is_empty() {
-            "Node Error (no message)"
-        }else{
-            &self.message
-        }
+        &self.message
     }
-
 }
 impl NodeError{
 
@@ -440,6 +510,15 @@ impl NodeError{
     }
     pub fn recoverable(&self) -> bool{
         false
+    }
+
+    pub fn category(&self) -> ErrorCategory{
+        self.kind.category()
+    }
+
+    pub fn panic(&self) -> !{
+        eprintln!("{}", self);
+        panic!(format!("{}", self));
     }
 }
 
@@ -457,7 +536,7 @@ impl fmt::Display for NodeError {
         }else { None };
 
         for recorded_frame in &self.at{
-            write!(f, "{}:{}:{} in {}\n", recorded_frame.file, recorded_frame.line, recorded_frame.column, recorded_frame.module)?;
+            write!(f, "{}:{}:{}\n", recorded_frame.file, recorded_frame.line, recorded_frame.column)?;
 
             if let Some(ref url) = url{
                 write!(f, "{}{}#L{}\n",url, recorded_frame.file, recorded_frame.line)?;
@@ -469,9 +548,6 @@ impl fmt::Display for NodeError {
         Ok(())
     }
 }
-
-
-
 
 pub mod writing_to_slices {
     use ::std;
@@ -633,4 +709,120 @@ pub mod writing_to_slices {
         assert_eq!(result.bytes_written(), 4);
 
     }
+}
+
+
+#[derive(Clone,Debug)]
+pub struct CErrorProxy {
+    c_ctx: *mut ffi::ImageflowContext,
+}
+impl CErrorProxy {
+    pub(crate) fn new(c_context: *mut ffi::ImageflowContext) -> CErrorProxy{
+        CErrorProxy{
+            c_ctx: c_context
+        }
+    }
+    pub(crate) fn null() -> CErrorProxy{
+        CErrorProxy{
+            c_ctx: ptr::null_mut()
+        }
+    }
+    pub fn has_error(&self) -> bool{
+        unsafe{
+            ffi::flow_context_has_error(self.c_ctx)
+        }
+    }
+    pub fn status(&self) -> CStatus{
+        unsafe {
+            CStatus::from(ffi::flow_context_error_reason(self.c_ctx))
+        }
+    }
+    pub fn require(&self) -> CError{
+        let e = self.get();
+        if e.status() == CStatus::Cat(ErrorCategory::Ok){
+            CError::from_status(CStatus::ErrorMismatch)
+        }else {
+            e
+        }
+    }
+    pub fn get(&self) -> CError {
+        let status = self.status();
+
+        match status {
+            CStatus::Cat(ErrorCategory::OutOfMemory) |
+            CStatus::Cat(ErrorCategory::Ok) => CError::from_status(status),
+            other => {
+                CError::new(other, self.get_error_and_stacktrace())
+            }
+        }
+    }
+
+    fn get_error_and_stacktrace(&self) -> String{
+        unsafe {
+            let mut buf = vec![0u8; 2048];
+
+            let chars_written =
+                ::ffi::flow_context_error_and_stacktrace(self.c_ctx, buf.as_mut_ptr(), buf.len(), false);
+
+            if chars_written < 0 {
+                //TODO: Retry until it fits
+                panic!("Error msg doesn't fit in 2kb");
+            } else {
+                buf.resize(chars_written as usize, 0u8);
+            }
+            String::from_utf8(buf).unwrap()
+        }
+    }
+}
+
+// Unused
+impl CErrorProxy{
+    fn clear_error(&mut self){
+        unsafe {
+            ffi::flow_context_clear_error(self.c_ctx)
+        }
+    }
+    /// # Expectations
+    ///
+    /// * Strings `message` and `function_name`, and `filename` should be null-terminated UTF-8 strings.
+    /// * The lifetime of `message` is expected to exceed the duration of this function call.
+    /// * The lifetime of `filename` and `function_name` (if provided), is expected to match or exceed the lifetime of `context`.
+    /// * You may provide a null value for `filename` or `function_name`, but for the love of puppies,
+    /// don't provide a dangling or invalid pointer, that will segfault... a long time later.
+    ///
+    /// # Caveats
+    ///
+    /// * You cannot raise a second error until the first has been cleared with
+    ///  `imageflow_context_clear_error`. You'll be ignored, as will future
+    ///   `imageflow_add_to_callstack` invocations.
+    /// * If you provide an error code of zero (why?!), a different error code will be provided.
+    fn c_raise_error(&mut self,
+                         error_code: i32,
+                         message: Option<&CStr>,
+                         filename: Option<&'static CStr>,
+                         line: Option<i32>,
+                         function_name: Option<&'static CStr>)
+                         -> bool {
+        unsafe {
+            ffi::flow_context_raise_error(self.c_ctx, error_code,
+                                          message.map(|cstr| cstr.as_ptr()).unwrap_or(ptr::null()),
+                                          filename.map(|cstr| cstr.as_ptr()).unwrap_or(ptr::null()),
+                                          line.unwrap_or(-1),
+                                          function_name.map(|cstr| cstr.as_ptr()).unwrap_or(ptr::null()))
+        }
+    }
+
+    fn c_add_to_callstack(&mut self,
+                              filename: Option<&'static CStr>,
+                              line: Option<i32>,
+                              function_name: Option<&'static CStr>)
+                              -> bool {
+        unsafe {
+            ffi::flow_context_add_to_callstack(self.c_ctx,
+                                               filename.map(|cstr| cstr.as_ptr()).unwrap_or(ptr::null()),
+                                               line.unwrap_or(-1),
+                                               function_name.map(|cstr| cstr.as_ptr()).unwrap_or(ptr::null()))
+        }
+    }
+
 }

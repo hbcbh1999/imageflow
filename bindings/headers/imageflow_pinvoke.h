@@ -89,15 +89,22 @@ void imageflow_context_destroy(void* context);
 /// Returns true if the context is in an error state. You must immediately deal with the error,
 /// as subsequent API calls will fail or cause undefined behavior until the error state is cleared
 ///
-/// Behavior is undefined if `context` is a null or invalid ptr; segfault likely.
+/// Behavior is undefined if `context` is a dangling or invalid ptr; segfault likely.
 bool imageflow_context_has_error(void* context);
 
-/// Clear the error state. This assumes that you know which API call failed and the problem has
-/// been resolved. Don't use this unless you're sure you've accounted for all possible
-/// inconsistent state (and fully understand the code paths that led to the error).
+/// Returns true if the context is "ok" or in an error state that is recoverable.
+/// You must immediately deal with the error,
+/// as subsequent API calls will fail or cause undefined behavior until the error state is cleared
 ///
-/// Behavior is undefined if `context` is a null or invalid ptr; segfault likely.
-void imageflow_context_clear_error(void* context);
+/// Behavior is undefined if `context` is a dangling or invalid ptr; segfault likely.
+bool imageflow_context_error_recoverable(void* context);
+
+/// Returns true if the context is "ok" or in an error state that is recoverable.
+/// You must immediately deal with the error,
+/// as subsequent API calls will fail or cause undefined behavior until the error state is cleared
+///
+/// Behavior is undefined if `context` is a dangling or invalid ptr; segfault likely.
+bool imageflow_context_error_try_clear(void* context);
 
 /// Prints the error messages and stacktrace to the given buffer in UTF-8 form; writes a null
 /// character to terminate the string, and *ALSO* returns the number of bytes written.
@@ -109,100 +116,39 @@ void imageflow_context_clear_error(void* context);
 ///
 /// Please be accurate with the buffer length, or a buffer overflow will occur.
 ///
-/// Behavior is undefined if `context` is a null or invalid ptr; segfault likely.
+/// Behavior is undefined if `context` is a dangling or invalid ptr; segfault likely.
 int64_t imageflow_context_error_and_stacktrace(void* context, char* buffer, size_t buffer_length, bool full_file_path);
+
+/// Prints the error messages (and optional stack frames) to the given buffer in UTF-8 form; writes a null
+/// character to terminate the string, and *ALSO* provides the number of bytes written (excluding the null terminator)
+///
+/// Returns false if the buffer was too small (or null) and the output was truncated.
+/// Returns true if all data was written OR if there was a bug in error serialization (that gets written, too).
+///
+/// If the data is truncated, "\n[truncated]\n" is written to the buffer
+///
+/// Please be accurate with the buffer length, or a buffer overflow will occur.
+///
+/// Behavior is undefined if `context` is a dangling or invalid ptr; segfault likely.
+bool imageflow_context_error_write_to_buffer(void* context, char* buffer, size_t buffer_length, size_t* bytes_written);
 
 /// Returns the numeric code associated with the error.
 ///
-/// ## Error codes
+/// ## Error categories
 ///
 /// * 0 - No error condition.
-/// * 10 - Out Of Memory condition (malloc/calloc/realloc failed).
-/// * 20 - I/O error
-/// * 30 - Invalid internal state (assertion failed; you found a bug).
-/// * 40 - Error: Not implemented. (Feature not implemented).
-/// * 50 - Invalid argument provided
-/// * 51 - Null argument provided
-/// * 52 - Invalid dimensions
-/// * 53 - Unsupported pixel format
-/// * 54 - Item does not exist
-/// * 60 - Image decoding failed
-/// * 61 - Image encoding failed
-/// * 70 - Graph invalid
-/// * 71 - Graph is cyclic
-/// * 72 - Invalid inputs to node
-/// * 73 - Maximum graph passes exceeded
-/// * 1024 - Other error; something else happened
-/// * 1025 through 2147483647 are reserved for user-defined errors
 ///
 ///
-/// Behavior is undefined if `context` is a null or invalid ptr; segfault likely.
+/// Behavior is undefined if `context` is a dangling or invalid ptr; segfault likely.
 int32_t imageflow_context_error_code(void* context);
 
 /// Prints the error to stderr and exits the process if an error has been raised on the context.
 /// If no error is present, the function returns false.
 ///
-/// Behavior is undefined if `context` is a null or invalid ptr; segfault likely.
+/// Behavior is undefined if `context` is a dangling or invalid ptr; segfault likely.
 ///
 /// THIS PRINTS DIRECTLY TO STDERR! Do not use in any kind of service! Command-line usage only!
 bool imageflow_context_print_and_exit_if_error(void* context);
-
-///
-/// Raises an error on the context.
-///
-/// Returns `true` on success, `false`  if an error was already present.
-///
-/// Designed to be safe(ish) for use in out-of-memory scenarios; no additional allocations are made.
-///
-/// See `imageflow_context_error_code` for a list of error codes.
-///
-///
-/// # Expectations
-///
-/// * Strings `message` and `function_name`, and `filename` should be null-terminated UTF-8 strings.
-/// * The lifetime of `message` is expected to exceed the duration of this function call.
-/// * The lifetime of `filename` and `function_name` (if provided), is expected to match or exceed the lifetime of `context`.
-/// * You may provide a null value for `filename` or `function_name`, but for the love of puppies,
-/// don't provide a dangling or invalid pointer, that will segfault... a long time later.
-///
-/// # Caveats
-///
-/// * You cannot raise a second error until the first has been cleared with
-///  `imageflow_context_clear_error`. You'll be ignored, as will future
-///   `imageflow_add_to_callstack` invocations.
-/// * Behavior is undefined if `context` is a null or invalid ptr; segfault likely.
-/// * Behavior is undefined if `message` is an invalid ptr; immediate segfault likely.
-/// * If you provide an error code of zero (why?!), a different error code will be provided.
-bool imageflow_context_raise_error(void* context, int32_t error_code, char const* message, char const* filename, int32_t line, char const* function_name);
-
-///
-/// Adds the given filename, line number, and function name to the call stack.
-/// Strings `function_name`, and `filename` should be null-terminated UTF-8 strings who will outlive `context`
-///
-/// Returns `true` if add was successful.
-///
-/// # Will fail and return false if...
-///
-/// * You haven't previously called `imageflow_context_raise_error`
-/// * You tried to raise a second error without clearing the first one. Call will be ignored.
-/// * You've exceeded the capacity of the call stack (which, at one point, was 14). But this
-///   category of failure is acceptable.
-///
-///
-/// # Expectations
-///
-/// * An error has been raised.
-/// * You may provide a null value for `filename` or `function_name`, but for the love of puppies,
-/// don't provide a dangling or invalid pointer, that will segfault... a long time later.
-/// * The lifetime of `file` and `function_name` (if provided), is expected to match
-///   or exceed the lifetime of `context`.
-/// * All strings must be null-terminated, C-style, valid UTF-8.
-///
-/// # Caveats
-///
-/// * Behavior is undefined if `context` is a null or invalid ptr; segfault likely.
-///
-bool imageflow_context_add_to_callstack(void* context, char const* filename, int32_t line, char const* function_name);
 
 ///
 /// Writes fields from the given imageflow_json_response to the locations referenced.
@@ -223,7 +169,7 @@ bool imageflow_json_response_read(void* context, void const* response_in, int64_
 /// Behavior is undefined if the context provided does not match the context with which the
 /// object was created.
 ///
-/// Behavior is undefined if `context` is a null or invalid ptr; segfault likely.
+/// Behavior is undefined if `context` is a dangling or invalid ptr; segfault likely.
 ///
 bool imageflow_json_response_destroy(void* context, void* response);
 
@@ -239,14 +185,12 @@ bool imageflow_json_response_destroy(void* context, void* response);
 /// * `method` should be a UTF-8 null-terminated string.
 ///   `json_buffer` should be a UTF-8 encoded buffer (not null terminated) of length json_buffer_size.
 ///
-/// The function will return NULL if a JSON response could not be allocated (or if some other
-/// bug occurred). If a null pointer is returned, consult the standard error methods of `context`
-/// for more detail.
+/// You should call `imageflow_context_has_error()` to see if this succeeded.
 ///
-/// The response can be cleaned up with `imageflow_json_response_destroy`
+/// A void is returned unless you provide invalid arguments or there is an out-of-memory
+/// condition. Call `imageflow_json_response_destroy` when you're done with it (or dispose the context).
 ///
-///
-/// Behavior is undefined if `context` is a null or invalid ptr; segfault likely.
+/// Behavior is undefined if `context` is a dangling or invalid ptr; segfault likely.
 void const* imageflow_context_send_json(void* context, char const* method, uint8_t const* json_buffer, size_t json_buffer_size);
 
 ///
@@ -261,13 +205,12 @@ void const* imageflow_context_send_json(void* context, char const* method, uint8
 /// * `method` should be a UTF-8 null-terminated string.
 ///   `json_buffer` should be a UTF-8 encoded buffer (not null terminated) of length json_buffer_size.
 ///
-/// The function will return NULL if a JSON response could not be allocated (or if some other
-/// bug occurred). If a null pointer is returned, consult the standard error methods of `context`
-/// for more detail.
+/// You should call `imageflow_context_has_error()` to see if this succeeded.
 ///
-/// The response can be cleaned up with `imageflow_json_response_destroy`
+/// A void is returned unless you provide invalid arguments or there is an out-of-memory
+/// condition. Call `imageflow_json_response_destroy` when you're done with it (or dispose the context).
 ///
-/// Behavior is undefined if `context` is a null or invalid ptr; segfault likely.
+/// Behavior is undefined if `context` is a dangling or invalid ptr; segfault likely.
 void const* imageflow_job_send_json(void* context, void* job, char const* method, uint8_t const* json_buffer, size_t json_buffer_size);
 
 ///

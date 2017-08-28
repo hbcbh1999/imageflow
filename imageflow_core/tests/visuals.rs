@@ -1,4 +1,5 @@
 extern crate hyper;
+#[macro_use]
 extern crate imageflow_core;
 extern crate libc;
 extern crate rustc_serialize;
@@ -6,13 +7,14 @@ extern crate imageflow_types as s;
 extern crate imageflow_helpers as hlp;
 extern crate serde;
 extern crate serde_json;
+extern crate smallvec;
 
 extern crate twox_hash;
 
 use std::ffi::CString;
 use std::path::Path;
 
-use imageflow_core::{Context, JsonResponse};
+use imageflow_core::{Context, JsonResponse, ErrorKind, NodeError, CodeLocation};
 
 fn default_build_config(debug: bool) -> s::Build001Config {
     s::Build001Config{graph_recording: match debug{ true => Some(s::Build001GraphRecording::debug_defaults()), false => None} ,
@@ -678,7 +680,7 @@ fn save_visual(c: &ChecksumCtx, bit: &BitmapBgra){
         let dest_cpath = CString::new(dest_path.into_os_string().into_string().unwrap()).unwrap();
         unsafe {
             if !::imageflow_core::ffi::flow_bitmap_bgra_save_png(c.c.flow_c(), bit as *const BitmapBgra, dest_cpath.as_ptr()){
-                c.c.error().assert_ok();
+                cerror!(c.c).panic();
             }
         }
 
@@ -691,7 +693,7 @@ fn load_visual(c: &ChecksumCtx, checksum: &str) -> *const BitmapBgra{
         let cpath = CString::new(path.into_os_string().into_string().unwrap()).unwrap();
         let mut b: *const BitmapBgra = std::ptr::null();
         if !::imageflow_core::ffi::flow_bitmap_bgra_load_png(c.c.flow_c(), &mut b as *mut *const BitmapBgra, cpath.as_ptr()) {
-            c.c.error().assert_ok();
+            cerror!(c.c).panic();
         }
         b
     }

@@ -62,6 +62,28 @@ char * flow_context_set_error_get_message_buffer(flow_c * context, flow_status_c
     return &context->error.message[0];
 }
 
+// Returns true if the operation succeeded
+// Does not add to call stack
+bool flow_context_set_error_get_message_buffer_info(flow_c * context, flow_status_code code, char * * buffer,  size_t * buffer_size)
+{
+    if (context->error.reason != flow_status_No_Error) {
+        // The last error wasn't cleared, lock it down. We prefer the original error.
+        context->error.locked = true;
+        *buffer = 0;
+        *buffer_size = 0;
+        return false;
+    }else {
+        if (code == flow_status_No_Error) {
+            context->error.reason = flow_status_Other_error;
+        } else {
+            context->error.reason = code;
+        }
+        *buffer = &context->error.message[0];
+        *buffer_size = FLOW_ERROR_MESSAGE_SIZE;
+        return true;
+    }
+}
+
 bool flow_context_add_to_callstack(flow_c * context, const char * file, int line, const char * function_name)
 {
     if (context->error.callstack_count < context->error.callstack_capacity && !context->error.locked
@@ -95,7 +117,7 @@ static const char * status_code_to_string(flow_status_code code)
         return "User defined error";
     }
     if (code >= flow_status_First_rust_error && code < flow_status_First_user_defined_error) {
-        return "";
+        return "rust";
     }
     switch (code) {
         case 0:
@@ -188,11 +210,20 @@ int64_t flow_context_error_message(flow_c * context, char * buffer, size_t buffe
 {
     int chars_written = 0;
     const char * reason_str = status_code_to_string(context->error.reason);
-    if (context->error.message[0] == 0) {
-        chars_written = flow_snprintf(buffer, buffer_size, "%s(%d)", , context->error.reason);
+    if (strcmp(reason_str, "rust") == 0){
+        if (context->error.message[0] == 0) {
+            // This branch shouldn't happen
+            chars_written = flow_snprintf(buffer, buffer_size, "rust error category %d - no message provided", (int)context->error.reason - 200);
+        } else {
+            chars_written = flow_snprintf(buffer, buffer_size, "%s", context->error.message);
+        }
     } else {
-        chars_written = flow_snprintf(buffer, buffer_size, "%s(%d) : %s", status_code_to_string(context->error.reason), context->error.reason),
-                                      context->error.message);
+        if (context->error.message[0] == 0) {
+            chars_written = flow_snprintf(buffer, buffer_size, "%s(%d)", reason_str, context->error.reason);
+        } else {
+            chars_written = flow_snprintf(buffer, buffer_size, "%s(%d) : %s", reason_str, context->error.reason,
+                                          context->error.message);
+        }
     }
     if (chars_written < 0) {
         return -1; // we ran out of space
@@ -242,7 +273,7 @@ void flow_context_initialize(flow_c * context)
     context->log.log = NULL;
     context->log.capacity = 0;
     context->log.count = 0;
-    context->error.callstack_capacity = 14;
+    context->error.callstack_capacity = 8;
     context->error.callstack_count = 0;
     context->error.callstack[0].file = NULL;
     context->error.callstack[0].line = -1;

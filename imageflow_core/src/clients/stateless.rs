@@ -1,6 +1,7 @@
 use ::Context;
 use ::Job;
 use ::JsonResponse;
+use ::ErrorCategory;
 
 pub use imageflow_types::Framewise;
 use ::internal_prelude::works_everywhere::*;
@@ -48,13 +49,13 @@ pub enum BuildFailure {
     Error { httpish_code: i32, message: String },
 }
 
-impl From<::FlowError> for BuildFailure {
-    fn from(e: ::FlowError) -> BuildFailure {
-        match e {
-            FlowError::Oom => BuildFailure::OutOfMemory,
+impl From<::NodeError> for BuildFailure {
+    fn from(e: ::NodeError) -> BuildFailure {
+        match e.category() {
+            ErrorCategory::OutOfMemory => BuildFailure::OutOfMemory,
             other => {
                 BuildFailure::Error {
-                    httpish_code: 500,
+                    httpish_code: 500, //TODO: use category
                     message: format!("{:?}", other),
                 }
             }

@@ -39,8 +39,6 @@ pub struct ImageflowJsonResponse {
     pub buffer_size: libc::size_t,
 }
 
-
-
 #[repr(C)]
 pub struct ImageflowJobIo {
     context: *mut ImageflowContext,
@@ -56,7 +54,6 @@ pub struct ImageflowJobIo {
     optional_file_length: i64
 }
 
-
 #[repr(C)]
 #[derive(Debug,Copy,Clone, PartialEq)]
 pub enum IoMode {
@@ -67,7 +64,6 @@ pub enum IoMode {
     WriteSeekable = 6, // 2 | 4,
     ReadWriteSeekable = 15, // 1 | 2 | 4 | 8
 }
-
 
 #[repr(C)]
 #[derive(Clone,Debug,PartialEq)]
@@ -715,16 +711,18 @@ mod mid_term {
                                                  buffer_length: libc::size_t,
                                                  full_file_path: bool)
                                                  -> i64;
+
+
         pub fn flow_context_print_and_exit_if_err(context: *mut ImageflowContext) -> bool;
 
         pub fn flow_context_error_reason(context: *mut ImageflowContext) -> i32;
 
-        pub fn flow_context_set_error_get_message_buffer(context: *mut ImageflowContext,
-                                                         code: i32, // FlowStatusCode
-                                                         file: *const libc::c_char,
-                                                         line: i32,
-                                                         function_name: *const libc::c_char)
-                                                         -> *const libc::c_char;
+        pub fn flow_context_set_error_get_message_buffer_info(context: *mut ImageflowContext,
+                                                     code: i32, // FlowStatusCode
+                                                     buffer_out: *mut *mut libc::c_char,
+                                                     buffer_size_out: *mut libc::size_t)
+                                                     -> bool;
+
 
         pub fn flow_context_raise_error(context: *mut ImageflowContext,
                                         error_code: i32,

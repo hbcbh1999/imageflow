@@ -70,7 +70,7 @@ impl Job{
     pub fn get_codec(&self, io_id: i32) -> Result<RefMut<CodecInstanceContainer>>{
         //TODO
         //We're treating failed borrows the same as everything else right now... :(
-        Ok(self.codecs.iter_mut().filter(|r| r.is_ok()).map(|r| r.unwrap()).find(|c| c.io_id == io_id).ok_or(FlowError::ErrNotImpl).unwrap())
+        Ok(self.codecs.iter_mut().filter(|r| r.is_ok()).map(|r| r.unwrap()).find(|c| c.io_id == io_id).ok_or(unimpl!()).unwrap())
     }
 
     pub fn get_io(&self, io_id: i32) -> Result<RefMut<IoProxy>>{
@@ -88,9 +88,6 @@ impl Job{
     }
 
 
-    fn c_error(&self) -> Option<FlowError>{
-        self.c.error().get_error_copy()
-    }
     fn flow_c(&self) -> *mut ::ffi::ImageflowContext{
         self.c.flow_c()
     }
