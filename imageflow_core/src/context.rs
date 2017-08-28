@@ -7,7 +7,7 @@ use io::IoProxy;
 use std::any::Any;
 use ::imageflow_types::collections::AddRemoveSet;
 use ::ffi::ImageflowJsonResponse;
-
+use ::errors::OutwardErrorBuffer;
 
 
 pub struct Context {
@@ -16,6 +16,7 @@ pub struct Context {
     jobs: AddRemoveSet<Job>,
     io_proxies: AddRemoveSet<IoProxy>,
     error: RefCell<ErrorBuffer>,
+    outward_error:  OutwardErrorBuffer
 }
 
 #[derive(Copy,Clone,Debug)]
@@ -43,11 +44,13 @@ impl Context {
                     c_ctx: inner,
                     error: RefCell::new(ErrorBuffer {c_ctx: inner}),
                     jobs: AddRemoveSet::with_capacity(2),
-                    io_proxies: AddRemoveSet::with_capacity(2)
+                    io_proxies: AddRemoveSet::with_capacity(2),
+                    outward_error: OutwardErrorBuffer::new()
                 }))
             }
         }).unwrap_or(Err(FlowError::Oom))
     }
+
 
     /// Used by abi; should not panic
     pub fn abi_begin_terminate(&mut self) -> bool {
@@ -56,6 +59,13 @@ impl Context {
         unsafe {
             ffi::flow_context_begin_terminate(self.c_ctx)
         }
+    }
+
+    pub fn outward_error(&self) -> &OutwardErrorBuffer{
+        &self.outward_error
+    }
+    pub fn outward_error_mut(&mut self) -> &mut OutwardErrorBuffer{
+        &mut self.outward_error
     }
 
     pub fn error_mut(&self) -> RefMut<ErrorBuffer>{
@@ -250,52 +260,7 @@ impl ErrorBuffer{
         }
     }
 
-    pub fn abi_raise_panic(&mut self,
-                                   e: &Any)-> bool{
-        //TODO: this does not handle if CString fails to allocate
 
-        let mut message = None;
-        let null_byte_message = || {CString::new("panic string contained a null byte").ok()};
-        if let Some(str) = e.downcast_ref::<String>(){
-            message = Some(CString::new(str.as_bytes()))
-        }
-        if let Some(str) = e.downcast_ref::<&str>(){
-            message = Some(CString::new(str.as_bytes()))
-        }
-
-        let unwrapped_message = message.and_then(|r| r.or_else(|_| CString::new("panic string contained a null byte")).ok());
-
-        eprintln!("{:?}", unwrapped_message);
-
-        self.abi_raise_error_c_style(31, unwrapped_message.as_ref().map(CString::as_c_str), None, None, None )
-    }
-
-
-
-    ///
-    /// Adds the given UTF-8 filename, line number, and function name to the call stack.
-    ///
-    /// Returns `true` if add was successful.
-    ///
-    /// # Will fail and return false if...
-    ///
-    /// * You haven't raised an error
-    /// * You tried to raise a second error without clearing the first one. Call will be ignored.
-    /// * You've exceeded the capacity of the call stack (which, at one point, was 14). But this
-    ///   category of failure is acceptable.
-    pub fn abi_add_to_callstack_c_style(&mut self, filename: Option<&'static CStr>,
-                                        line: Option<i32>,
-                                        function_name: Option<&'static CStr>)
-                                        -> bool {
-
-
-        unsafe {
-            ffi::flow_context_add_to_callstack(self.c_ctx,
-                                               filename.map(|cstr| cstr.as_ptr()).unwrap_or(ptr::null()),
-                                               line.unwrap_or(-1),
-                                               function_name.map(|cstr| cstr.as_ptr()).unwrap_or(ptr::null()))
-        }
-    }
 
     pub fn assert_ok(&self) {
         if let Some(e) = self.get_error_copy() {

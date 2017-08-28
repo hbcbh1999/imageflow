@@ -69,7 +69,7 @@ use super::definitions::*;
 fn test_err() {
 
     let e = nerror!(::ErrorKind::BitmapPointerNull);
-    assert_eq!(e.kind, ErrorKind::BitmapPointerNull);
+    assert_eq!(e.kind, ::ErrorKind::BitmapPointerNull);
     assert!(format!("{}",&e).starts_with("NodeError BitmapPointerNull at"));
     let e = nerror!(::ErrorKind::BitmapPointerNull, "hi");
     assert!(format!("{}",&e).starts_with("NodeError BitmapPointerNull: hi at"));

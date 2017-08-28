@@ -76,6 +76,12 @@ pub enum CmdError {
 }
 
 impl CmdError {
+
+
+
+    pub fn to_json(&self) -> JsonResponse{
+
+    }
     pub fn exit_code(&self) -> i32 {
         //        #define EX_USAGE	64	/* command line usage error */
         //        #define EX_DATAERR	65	/* data format error */
@@ -142,12 +148,11 @@ impl From<fc::FlowError> for CmdError {
 
 impl std::fmt::Display for CmdError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if let &CmdError::FlowError(fc::FlowError::NodeError(ref e)) = self {
+        if let &CmdError::FlowError(ref e) = self {
             write!(f, "{}", e)
         } else {
             write!(f, "{:#?}", self)
         }
-
     }
 }
 
@@ -416,25 +421,19 @@ impl CmdBuild {
             Err(CmdError::Incomplete)
         };
 
-
         CmdBuild { response: Some(response), ..self }
     }
 
-//    pub fn get_modified_recipe<'a>(&'a self) -> &'a Result<s::Build001>{
-//        &self.job
-//    }
 
     pub fn get_json_response(&self) -> JsonResponse{
-        match &self.response{
-            &Some(Err(CmdError::FlowError(ref e))) => JsonResponse::from_result(Err(e.clone())),
-            &Some(Ok(ref r)) => JsonResponse::from_result(Ok(r.clone())),
-            //Err(CmdError::InvalidJson(e)) => JsonResponse::from_result(fc::Result::Err(fc::FlowError::e))
-            _ => {
-                //TODO: implement serialization for JsonResult
-                unimplemented!();
-            }
+        if let Some(e) = self.get_first_error(){
+            e.to_json()
+        } else if let Some(Ok(ref r)) = self.response{
+            JsonResponse::from_result(Ok(r.clone()))
+        } else {
+            // Should not be called before maybe_build
+            unreachable!();
         }
-
     }
     ///
     /// Write the JSON response (if present) to the given file or STDOUT
@@ -453,35 +452,26 @@ impl CmdBuild {
     }
 
     pub fn write_errors_maybe(&self) -> std::io::Result<()> {
-        let err = &mut std::io::stderr();
-
-        if let Err(ref e) = self.job {
-            writeln!(err, "{:?}", e)?;
-        }
-
-        if let Some(ref rr) = self.response {
-            match *rr {
-                Err(ref e) => {
-                    writeln!(err, "{}", e)?;
-                }
-                Ok(_) => {}
-            }
+        if let Some(e) = self.get_first_error() {
+            eprintln!("{}", e)?;
         }
         Ok(())
     }
 
-    pub fn get_exit_code(&self) -> Option<i32> {
+    pub fn get_first_error(&self) -> Option<&CmdError>{
         if let Err(ref e) = self.job {
-            return Some(e.exit_code());
+            return Some(e);
         }
-        if let Some(ref rr) = self.response {
-            match *rr {
-                Err(ref err) => Some(err.exit_code()),
-                Ok(_) => Some(0)
-            }
-        } else {
-            None
+        match self.response{
+            Some(Err(ref e)) => Some(e),
+            _ => None
         }
+    }
+
+    pub fn get_exit_code(&self) -> Option<i32> {
+        self.get_first_error()
+            .map(|e| e.exit_code())
+            .unwrap_or_else( if self.response.is_some() { Some(0) } else { None })
     }
 
     fn build(data: s::Build001) -> Result<s::ResponsePayload> {

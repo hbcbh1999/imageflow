@@ -104,32 +104,6 @@ pub enum Floatspace {
 }
 
 
-#[repr(C)]
-#[derive(Copy,Clone,Debug, PartialEq)]
-pub enum FlowStatusCode {
-    NoError = 0,
-    OutOfMemory = 10,
-    IOError = 20,
-    InvalidInternalState = 30,
-    NotImplemented = 40,
-    InvalidArgument = 50,
-    NullArgument = 51,
-    InvalidDimensions = 52,
-    UnsupportedPixelFormat = 53,
-    ItemDoesNotExist = 54,
-
-    ImageDecodingFailed = 60,
-    ImageEncodingFailed = 61,
-    GraphInvalid = 70,
-    GraphIsCyclic = 71,
-    InvalidInputsToNode = 72,
-    MaximumGraphPassesExceeded = 73,
-    OtherError = 1024,
-    // FIXME: FirstUserDefinedError is 1025 in C but it conflicts with __LastLibraryError
-    // ___LastLibraryError,
-    FirstUserDefinedError = 1025,
-    LastUserDefinedError = 2147483647,
-}
 
 
 pub const TESTED_FILTER_OPTIONS: &'static [&'static str] = &["",

@@ -94,6 +94,9 @@ static const char * status_code_to_string(flow_status_code code)
     if (code >= flow_status_First_user_defined_error && code <= flow_status_Last_user_defined_error) {
         return "User defined error";
     }
+    if (code >= flow_status_First_rust_error && code < flow_status_First_user_defined_error) {
+        return "";
+    }
     switch (code) {
         case 0:
             return "No error";
@@ -121,14 +124,6 @@ static const char * status_code_to_string(flow_status_code code)
             return "Image decoding failed";
         case 61:
             return "Image encoding failed";
-        case 70:
-            return "Graph invalid";
-        case 71:
-            return "Graph is cyclic";
-        case 72:
-            return "Invalid inputs to node";
-        case 73:
-            return "Maximum graph passes exceeded";
         case 90:
             return "C Error Reporting Inconsistency";
         case 1024:
@@ -192,10 +187,11 @@ int64_t flow_context_error_and_stacktrace(flow_c * context, char * buffer, size_
 int64_t flow_context_error_message(flow_c * context, char * buffer, size_t buffer_size)
 {
     int chars_written = 0;
+    const char * reason_str = status_code_to_string(context->error.reason);
     if (context->error.message[0] == 0) {
-        chars_written = flow_snprintf(buffer, buffer_size, "%s", status_code_to_string(context->error.reason));
+        chars_written = flow_snprintf(buffer, buffer_size, "%s(%d)", , context->error.reason);
     } else {
-        chars_written = flow_snprintf(buffer, buffer_size, "%s : %s", status_code_to_string(context->error.reason),
+        chars_written = flow_snprintf(buffer, buffer_size, "%s(%d) : %s", status_code_to_string(context->error.reason), context->error.reason),
                                       context->error.message);
     }
     if (chars_written < 0) {

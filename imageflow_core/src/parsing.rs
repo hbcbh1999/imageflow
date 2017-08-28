@@ -16,7 +16,7 @@ impl GraphTranslator {
     }
 
 
-    pub fn translate_framewise(&self, framewise: s::Framewise) -> Result<Graph> {
+    pub fn translate_framewise(&self, framewise: s::Framewise) -> NResult<Graph> {
         let graph = match framewise {
             s::Framewise::Graph(g) => g,
             s::Framewise::Steps(s) => self.steps_to_graph(s),
@@ -42,7 +42,7 @@ impl GraphTranslator {
         }
     }
 
-    pub fn translate_graph(&self, from: s::Graph) -> Result<Graph> {
+    pub fn translate_graph(&self, from: s::Graph) -> NResult<Graph> {
         let mut g = Graph::with_capacity(10, 10); //Estimate better than this
 
         let mut node_id_map: HashMap<i32, NodeIndex> = HashMap::new();
@@ -62,7 +62,7 @@ impl GraphTranslator {
             };
 
             if let  Err(daggy::WouldCycle(_)) = g.add_edge(from_id, to_id, new_edge_kind) {
-                return Err(FlowError::GraphCyclic);
+                return Err(nerror!(ErrorKind::GraphCyclic));
             }
         }
         Ok(g)
