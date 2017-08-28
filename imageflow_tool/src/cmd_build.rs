@@ -10,7 +10,8 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::path::{Path};
 use std::io::{Write, Read, BufWriter};
-use fc::{JsonResponse, NodeError, ErrorCategory};
+use fc::{JsonResponse, FlowError, ErrorCategory};
+use fc::errors::CategorizedError;
 
 pub enum JobSource {
     JsonFile(String),
@@ -71,10 +72,10 @@ pub enum CmdError {
     BadArguments(String),
     InconsistentUseOfIoId(String),
     // NotImplemented,
-    FlowError(fc::NodeError),
+    FlowError(fc::FlowError),
     Incomplete,
 }
-impl fc::CategorizedError for CmdError{
+impl CategorizedError for CmdError{
     fn category(&self) -> ErrorCategory{
         match *self{
             CmdError::JsonRecipeNotFound(_) |
@@ -91,11 +92,11 @@ impl fc::CategorizedError for CmdError{
 }
 impl CmdError {
     pub fn to_json(&self) -> JsonResponse{
-        //TODO
-
+        let message = format!("{:#?}", self);
+        JsonResponse::fail_with_message(self.category().http_status_code() as i64, &message)
     }
     pub fn exit_code(&self) -> i32 {
-        self.category().exit_code()
+        self.category().process_exit_code()
     }
 }
 
@@ -113,7 +114,7 @@ impl From<serde_json::error::Error> for CmdError {
     }
 }
 impl From<fc::FlowError> for CmdError {
-    fn from(e: fc::NodeError) -> CmdError {
+    fn from(e: fc::FlowError) -> CmdError {
         CmdError::FlowError(e)
     }
 }
@@ -444,7 +445,7 @@ impl CmdBuild {
     pub fn get_exit_code(&self) -> Option<i32> {
         self.get_first_error()
             .map(|e| e.exit_code())
-            .unwrap_or_else( if self.response.is_some() { Some(0) } else { None })
+            .or( if self.response.is_some() { Some(0) } else { None })
     }
 
     fn build(data: s::Build001) -> Result<s::ResponsePayload> {

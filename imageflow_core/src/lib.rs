@@ -102,7 +102,7 @@ mod internal_prelude {
         pub use ::{Graph, Context, Job, JsonResponse,
                    MethodRouter};
         #[doc(no_inline)]
-        pub use ::{CError, flow, clients, NodeError, Result, ErrorKind};
+        pub use ::{CError, flow, clients, FlowError, Result, ErrorKind};
         #[doc(no_inline)]
         pub use ::clients::fluent;
     }
@@ -115,7 +115,7 @@ mod internal_prelude {
     #[doc(hidden)]
     pub mod works_everywhere {
         #[doc(no_inline)]
-        pub use ::{CError, flow, clients, NodeError, Result, ErrorKind};
+        pub use ::{CError, flow, clients, FlowError, Result, ErrorKind};
         #[doc(no_inline)]
         pub use ::internal_prelude::external::*;
     }

@@ -2,7 +2,7 @@ use ::std;
 use ::for_other_imageflow_crates::preludes::external_without_std::*;
 use ::ffi;
 use ::job::Job;
-use ::{Context, CError,  Result, JsonResponse, ErrorKind, NodeError};
+use ::{Context, CError, Result, JsonResponse, ErrorKind, FlowError};
 use ::ffi::CodecInstance;
 use ::ffi::BitmapBgra;
 use ::imageflow_types::collections::AddRemoveSet;

@@ -127,7 +127,7 @@ extern crate smallvec;
 extern crate backtrace;
 use c::ffi;
 
-pub use c::{Context, Job, NodeError, ErrorCategory, ErrorKind, CodeLocation};
+pub use c::{Context, Job, FlowError, ErrorCategory, ErrorKind, CodeLocation};
 pub use c::IoProxy as JobIo;
 pub use c::ffi::ImageflowJsonResponse as JsonResponse;
 use std::any::Any;
@@ -477,7 +477,7 @@ pub unsafe extern "C" fn imageflow_context_error_write_to_buffer(context: *mut C
 /// Behavior is undefined if `context` is a dangling or invalid ptr; segfault likely.
 #[no_mangle]
 pub unsafe extern "C" fn imageflow_context_error_code(context: *mut Context) -> i32 {
-    context!(context).outward_error().category().to_c_status_code()
+    context!(context).outward_error().category().to_c_error_codes()
 }
 
 /// Prints the error to stderr and exits the process if an error has been raised on the context.
@@ -667,11 +667,16 @@ unsafe fn imageflow_send_json(context: *mut Context,
     let _ = (json_bytes.first(), json_bytes.last());
 
 
-    let response_result = if let Some(j) = job{
-        (&mut *j).message(method_str, json_bytes)
-    }else {
-        ctx.message(method_str, json_bytes)
-    };
+    let response_result = catch_unwind( AssertUnwindSafe(|| {
+        if let Some(j) = job{
+            (&mut *j).message(method_str, json_bytes)
+        }else {
+            ctx.message(method_str, json_bytes)
+        }
+    }));
+
+    // TODO: copy panic and error to context, AND serialize
+    // An unfortunate copy occurs here
 
     let response = response_result.unwrap();
 
@@ -693,7 +698,6 @@ pub fn create_abi_json_response(ctx: &mut Context,
                                                  ctx.flow_c() as *mut libc::c_void,
                                                  ptr::null(),
                                                  line!() as i32) as *mut u8;
-        // Return null on OOM
         if pointer.is_null() {
             ctx.outward_error().try_set_error(nerror!(ErrorKind::AllocationFailed, "Failed to allocate JsonResponse ({} bytes)", alloc_size));
             return ptr::null();
@@ -778,10 +782,15 @@ pub unsafe extern "C" fn imageflow_io_create_for_file(context: *mut Context,
                                                       filename: *const libc::c_char,
                                                       cleanup: CleanupWith)
                                                       -> *mut JobIo {
-    let s = CStr::from_ptr(filename).to_str().unwrap();
-    //TODO: handle invalid utf8
-    context!(context).create_io_from_filename_with_mode(s, std::mem::transmute(mode))
-        .map(|mut io| &mut *io as *mut JobIo)
+    let c = context_ready!(context);
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let s = CStr::from_ptr(filename).to_str().unwrap();
+        c.create_io_from_filename_with_mode(s, std::mem::transmute(mode)).map(|mut io| &mut *io as *mut JobIo)
+    }));
+
+    handle_result!(c, result, ptr::null_mut)
+
         .unwrap_or_else(|e| { e.write_to_context_ptr(context); ptr::null_mut() })
 }
 

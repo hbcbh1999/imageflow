@@ -25,9 +25,9 @@ mod internal_prelude {
     pub use super::*;
     #[macro_use]
     pub use super::super::*;
-    pub use ::{Context, Job, Result, NodeError};
+    pub use ::{Context, Job, Result, FlowError};
 }
-use ::{Context, Job, Result, NodeError};
+use ::{Context, Job, Result, FlowError};
 extern crate imageflow_types as s;
 pub use self::clone_crop_fill_expand::CLONE;
 pub use self::clone_crop_fill_expand::COPY_RECT;
@@ -70,11 +70,11 @@ fn test_err() {
 
     let e = nerror!(::ErrorKind::BitmapPointerNull);
     assert_eq!(e.kind, ::ErrorKind::BitmapPointerNull);
-    assert!(format!("{}",&e).starts_with("NodeError BitmapPointerNull at"));
+    assert!(format!("{}",&e).starts_with("FlowError BitmapPointerNull at"));
     let e = nerror!(::ErrorKind::BitmapPointerNull, "hi");
-    assert!(format!("{}",&e).starts_with("NodeError BitmapPointerNull: hi at"));
+    assert!(format!("{}",&e).starts_with("FlowError BitmapPointerNull: hi at"));
     let e = nerror!(::ErrorKind::BitmapPointerNull, "hi {}", 1);
-    assert!(format!("{}",&e).starts_with("NodeError BitmapPointerNull: hi 1 at"));
+    assert!(format!("{}",&e).starts_with("FlowError BitmapPointerNull: hi 1 at"));
 }
 
 pub struct NodeDefHelpers {}

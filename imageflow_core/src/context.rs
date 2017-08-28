@@ -2,7 +2,7 @@ use ::std;
 use ::for_other_imageflow_crates::preludes::external_without_std::*;
 use ::ffi;
 use ::job::Job;
-use ::{CError, JsonResponse, ErrorKind, NodeError, Result};
+use ::{CError, JsonResponse, ErrorKind, FlowError, Result};
 use io::IoProxy;
 use std::any::Any;
 use ::imageflow_types::collections::AddRemoveSet;

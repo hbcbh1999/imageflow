@@ -49,8 +49,8 @@ pub enum BuildFailure {
     Error { httpish_code: i32, message: String },
 }
 
-impl From<::NodeError> for BuildFailure {
-    fn from(e: ::NodeError) -> BuildFailure {
+impl From<::FlowError> for BuildFailure {
+    fn from(e: ::FlowError) -> BuildFailure {
         match e.category() {
             ErrorCategory::OutOfMemory => BuildFailure::OutOfMemory,
             other => {

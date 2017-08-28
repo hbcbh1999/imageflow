@@ -93,6 +93,7 @@ struct flow_error_info {
     int callstack_count;
     int callstack_capacity;
     bool locked;
+    bool status_included_in_message;
     char message[FLOW_ERROR_MESSAGE_SIZE + 1];
 };
 

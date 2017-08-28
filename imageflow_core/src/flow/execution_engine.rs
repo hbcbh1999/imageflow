@@ -224,7 +224,7 @@ impl<'a, 'b> Engine<'a, 'b> where 'a: 'b {
         // Invoke estimation
         // If not implemented, estimation is impossible
         let result = match ctx.weight(node_id).def.estimate(&mut ctx, node_id){
-            Err(NodeError{kind: ErrorKind::MethodNotImplemented, ..}) => {
+            Err(FlowError {kind: ErrorKind::MethodNotImplemented, ..}) => {
                 Ok(FrameEstimate::Impossible)
             }
             other => other

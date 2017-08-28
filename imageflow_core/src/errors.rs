@@ -29,25 +29,25 @@ macro_rules! loc {
 #[macro_export]
 macro_rules! nerror {
     ($kind:expr) => (
-        ::NodeError{
+        ::FlowError{
             kind: $kind,
-            message: format!("NodeError {:?}", $kind),
+            message: String::new(), // If .message() is needed after all, then crate_enum_derive on ErrorKind and switch message to Cow<>
             at: ::smallvec::SmallVec::new(),
             node: None
         }.at(here!())
     );
     ($kind:expr, $fmt:expr) => (
-        ::NodeError{
+        ::FlowError{
             kind: $kind,
-            message:  format!(concat!("NodeError {:?}: ",$fmt ), $kind,),
+            message:  format!(concat!("{:?}: ",$fmt ), $kind,),
             at: ::smallvec::SmallVec::new(),
             node: None
         }.at(here!())
     );
     ($kind:expr, $fmt:expr, $($arg:tt)*) => (
-        ::NodeError{
+        ::FlowError{
             kind: $kind,
-            message:  format!(concat!("NodeError {:?}: ", $fmt), $kind, $($arg)*),
+            message:  format!(concat!("{:?}: ", $fmt), $kind, $($arg)*),
             at: ::smallvec::SmallVec::new(),
             node: None
         }.at(here!())
@@ -57,7 +57,7 @@ macro_rules! nerror {
 #[macro_export]
 macro_rules! unimpl {
     () => (
-        ::NodeError{
+        ::FlowError{
             kind: ::ErrorKind::MethodNotImplemented,
             message: String::new(),
             at: ::smallvec::SmallVec::new(),
@@ -71,7 +71,7 @@ macro_rules! unimpl {
 macro_rules! cerror {
     ($context:expr) => {{
         let cerr = $ context.c_error().require();
-        ::NodeError{
+        ::FlowError{
             kind: ::ErrorKind::CError(cerr.status()),
             message: cerr.into_string(),
             at: ::smallvec::SmallVec::new(),
@@ -80,7 +80,7 @@ macro_rules! cerror {
     }};
     ($context:expr, $fmt:expr) => {{
         let cerr = $context.c_error().require();
-        ::NodeError{
+        ::FlowError{
             kind: ::ErrorKind::CError(cerr.status()),
             message: format!(concat!($fmt, ": {}"), cerr.into_string()),
             at: ::smallvec::SmallVec::new(),
@@ -89,7 +89,7 @@ macro_rules! cerror {
     }};
     ($context:expr, $fmt:expr, $($arg:tt)*) => {{
         let cerr = $context.c_error().require();
-        ::NodeError{
+        ::FlowError{
             kind: ::ErrorKind::CError(cerr.status()),
             message: format!(concat!($fmt, ": {}"), $($arg)*, cerr.into_string()),
             at: ::smallvec::SmallVec::new(),
@@ -101,7 +101,7 @@ macro_rules! cerror {
 #[macro_export]
 macro_rules! err_oom {
     () => (
-        ::NodeError{
+        ::FlowError{
             kind: ::ErrorKind::AllocationFailed,
             message: String::new(),
             at: ::smallvec::SmallVec::new(),
@@ -110,10 +110,138 @@ macro_rules! err_oom {
     );
 }
 
-pub type Result<T> = std::result::Result<T, NodeError>;
+pub type Result<T> = std::result::Result<T, FlowError>;
 
-trait CategorizedError{
+pub trait CategorizedError{
     fn category(&self) -> ErrorCategory;
+}
+
+
+
+#[derive(Debug,  Clone, PartialEq, Eq)]
+pub enum ErrorKind{
+    AllocationFailed,
+
+    GraphCyclic,
+    InvalidNodeConnections,
+
+    NullArgument,
+    InvalidArgument,
+    InvalidCoordinates,
+    InvalidNodeParams,
+
+    FailedBorrow,
+    NodeParamsMismatch,
+    BitmapPointerNull,
+    MethodNotImplemented,
+    ValidationNotImplemented,
+    InvalidOperation,
+    InvalidState,
+    Category(ErrorCategory),
+    CError(CStatus)
+}
+impl CategorizedError for ErrorKind{
+    fn category(&self) -> ErrorCategory{
+        match self{
+            &ErrorKind::AllocationFailed => ErrorCategory::OutOfMemory,
+
+            &ErrorKind::GraphCyclic |
+            &ErrorKind::InvalidNodeConnections => ErrorCategory::GraphInvalid,
+            &ErrorKind::NullArgument |
+            &ErrorKind::InvalidArgument |
+            &ErrorKind::InvalidCoordinates |
+            &ErrorKind::InvalidNodeParams => ErrorCategory::ArgumentInvalid,
+            &ErrorKind::FailedBorrow |
+            &ErrorKind::NodeParamsMismatch |
+            &ErrorKind::BitmapPointerNull |
+            &ErrorKind::MethodNotImplemented |
+            &ErrorKind::ValidationNotImplemented |
+            &ErrorKind::InvalidOperation |
+            &ErrorKind::InvalidState => ErrorCategory::InternalError,
+            &ErrorKind::CError(ref e) => e.category(),
+            &ErrorKind::Category(c) => c
+        }
+    }
+}
+impl ErrorKind{
+    pub fn cat(&self) -> ErrorCategory{
+        self.category()
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct CodeLocation{
+    pub line: u32,
+    pub column: u32,
+    pub file: &'static str,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct FlowError {
+    pub kind: ErrorKind,
+    pub message: String,
+    pub at: ::smallvec::SmallVec<[CodeLocation;4]>,
+    pub node: Option<::flow::definitions::NodeDebugInfo>
+}
+
+impl ::std::error::Error for FlowError {
+    fn description(&self) -> &str {
+        &self.message
+    }
+}
+impl FlowError {
+
+    pub fn at(mut self, c: CodeLocation ) -> FlowError {
+        self.at.push(c);
+        self
+    }
+    pub fn recoverable(&self) -> bool{
+        false
+    }
+
+    pub fn category(&self) -> ErrorCategory{
+        self.kind.category()
+    }
+
+    pub fn panic(&self) -> !{
+        eprintln!("{}", self);
+        panic!(format!("{}", self));
+    }
+}
+
+/// The only difference between display and debug is that display prepends the category
+impl fmt::Display for FlowError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}: {:?}", self.category(), self)
+    }
+}
+impl fmt::Debug for FlowError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.message.is_empty() {
+            write!(f, "{:?} at\n", self.kind)?;
+        }else{
+            write!(f, "{} at\n", self.message)?;
+        }
+
+
+        let url = if::imageflow_types::build_env_info::BUILT_ON_CI{
+            let repo = ::imageflow_types::build_env_info::BUILD_ENV_INFO.get("CI_REPO").unwrap_or(&Some("imazen/imageflow")).unwrap_or("imazen/imageflow");
+            let commit =  ::imageflow_types::build_env_info::GIT_COMMIT;
+            Some(format!("https://github.com/{}/blob/{}/", repo, commit))
+        }else { None };
+
+        for recorded_frame in &self.at{
+            write!(f, "{}:{}:{}\n", recorded_frame.file, recorded_frame.line, recorded_frame.column)?;
+
+            if let Some(ref url) = url{
+                write!(f, "{}{}#L{}\n",url, recorded_frame.file, recorded_frame.line)?;
+            }
+        }
+        if let Some(ref n) = self.node{
+            write!(f, "Active node:\n{:#?}\n", n)?;
+        }
+        Ok(())
+    }
 }
 
 #[repr(C)]
@@ -168,7 +296,6 @@ pub enum ErrorCategory{
     // !!!!!!!!!!!!!!!!!!!!!!!!!!
 }
 impl ErrorCategory{
-
     pub fn last() -> ErrorCategory {
         ErrorCategory::Unknown
     }
@@ -180,7 +307,6 @@ impl ErrorCategory{
         }
 
     }
-
     pub fn from_c_status(status: i32) -> Option<ErrorCategory>{
         if let Some(v) = ErrorCategory::from_i32(status - 200){
             Some(v)
@@ -196,7 +322,7 @@ impl ErrorCategory{
         }
     }
 
-    pub fn to_c_status(&self) -> i32{
+    pub fn to_c_error_code(&self) -> i32{
         match *self{
             ErrorCategory::Ok => 0,
             ErrorCategory::Custom => 1025,
@@ -208,7 +334,7 @@ impl ErrorCategory{
             other => 200 + *self as i32
         }
     }
-    pub fn exit_code(&self) -> i32{
+    pub fn process_exit_code(&self) -> i32{
         match *self {
             ErrorCategory::ArgumentInvalid |
             ErrorCategory::GraphInvalid |
@@ -233,7 +359,7 @@ impl ErrorCategory{
             ErrorCategory::Ok => 0
         }
     }
-    pub fn status_code(&self) -> i32{
+    pub fn http_status_code(&self) -> i32{
         match *self {
             ErrorCategory::Ok => 200,
 
@@ -271,7 +397,7 @@ impl ErrorCategory{
 pub struct OutwardErrorBuffer{
     category: ErrorCategory,
     last_panic: Option<Box<Any>>,
-    last_error: Option<NodeError>
+    last_error: Option<FlowError>
 }
 impl OutwardErrorBuffer{
     pub fn new() -> OutwardErrorBuffer{
@@ -290,7 +416,7 @@ impl OutwardErrorBuffer{
             false
         }
     }
-    pub fn try_set_error(&mut self, error: NodeError) -> bool{
+    pub fn try_set_error(&mut self, error: FlowError) -> bool{
         if self.last_error.is_none() {
             self.category = error.category();
             self.last_error = Some(error);
@@ -355,7 +481,7 @@ impl std::fmt::Display for OutwardErrorBuffer {
             format_panic_value(panic,f)?;
         }
         if let Some(ref error) = self.last_error{
-            writeln!(f, "{}", error)?;
+            writeln!(f, "{:?}", error)?;
         }
         Ok(())
     }
@@ -395,7 +521,7 @@ pub enum CStatus{
     Custom(i32),
     Unknown(i32),
     ErrorMismatch,
-    Cat(ErrorCategory),
+    Cat(ErrorCategory)
 }
 impl CategorizedError for CStatus{
     fn category(&self) -> ErrorCategory {
@@ -426,7 +552,7 @@ impl CStatus {
             &CStatus::Custom(v) => v,
             &CStatus::Unknown(v) => v,
             &CStatus::ErrorMismatch => 90,
-            &CStatus::Cat(c) => c.to_c_status()
+            &CStatus::Cat(c) => c.to_c_error_code()
         }
     }
 }
@@ -435,119 +561,6 @@ impl CStatus {
 
 
 
-
-#[derive(Debug,  Clone, PartialEq, Eq)]
-pub enum ErrorKind{
-    AllocationFailed,
-
-    GraphCyclic,
-    InvalidNodeConnections,
-
-    NullArgument,
-    InvalidArgument,
-    InvalidCoordinates,
-    InvalidNodeParams,
-
-    FailedBorrow,
-    NodeParamsMismatch,
-    BitmapPointerNull,
-    MethodNotImplemented,
-    ValidationNotImplemented,
-    InvalidOperation,
-    InvalidState,
-    Category(ErrorCategory),
-    CError(CStatus)
-}
-impl CategorizedError for ErrorKind{
-    fn category(&self) -> ErrorCategory{
-        match self{
-            &ErrorKind::AllocationFailed => ErrorCategory::OutOfMemory,
-
-            &ErrorKind::GraphCyclic |
-            &ErrorKind::InvalidNodeConnections => ErrorCategory::GraphInvalid,
-            &ErrorKind::NullArgument |
-            &ErrorKind::InvalidArgument |
-            &ErrorKind::InvalidCoordinates |
-            &ErrorKind::InvalidNodeParams => ErrorCategory::ArgumentInvalid,
-            &ErrorKind::FailedBorrow |
-            &ErrorKind::NodeParamsMismatch |
-            &ErrorKind::BitmapPointerNull |
-            &ErrorKind::MethodNotImplemented |
-            &ErrorKind::ValidationNotImplemented |
-            &ErrorKind::InvalidOperation |
-            &ErrorKind::InvalidState => ErrorCategory::InternalError,
-            &ErrorKind::CError(ref e) => e.category(),
-            &ErrorKind::Category(c) => c
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub struct CodeLocation{
-    pub line: u32,
-    pub column: u32,
-    pub file: &'static str,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct NodeError{
-    pub kind: ErrorKind,
-    pub message: String,
-    pub at: ::smallvec::SmallVec<[CodeLocation;4]>,
-    pub node: Option<::flow::definitions::NodeDebugInfo>
-}
-
-impl ::std::error::Error for NodeError {
-    fn description(&self) -> &str {
-        &self.message
-    }
-}
-impl NodeError{
-
-    pub fn at(mut self, c: CodeLocation ) -> NodeError {
-        self.at.push(c);
-        self
-    }
-    pub fn recoverable(&self) -> bool{
-        false
-    }
-
-    pub fn category(&self) -> ErrorCategory{
-        self.kind.category()
-    }
-
-    pub fn panic(&self) -> !{
-        eprintln!("{}", self);
-        panic!(format!("{}", self));
-    }
-}
-
-impl fmt::Display for NodeError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.message.is_empty() {
-            write!(f, "Error {:?}: at\n", self.kind)?;
-        }else{
-            write!(f, "{} at\n", self.message)?;
-        }
-        let url = if::imageflow_types::build_env_info::BUILT_ON_CI{
-            let repo = ::imageflow_types::build_env_info::BUILD_ENV_INFO.get("CI_REPO").unwrap_or(&Some("imazen/imageflow")).unwrap_or("imazen/imageflow");
-            let commit =  ::imageflow_types::build_env_info::GIT_COMMIT;
-            Some(format!("https://github.com/{}/blob/{}/", repo, commit))
-        }else { None };
-
-        for recorded_frame in &self.at{
-            write!(f, "{}:{}:{}\n", recorded_frame.file, recorded_frame.line, recorded_frame.column)?;
-
-            if let Some(ref url) = url{
-                write!(f, "{}{}#L{}\n",url, recorded_frame.file, recorded_frame.line)?;
-            }
-        }
-        if let Some(ref n) = self.node{
-            write!(f, "Active node:\n{:#?}\n", n)?;
-        }
-        Ok(())
-    }
-}
 
 pub mod writing_to_slices {
     use ::std;
@@ -590,6 +603,17 @@ pub mod writing_to_slices {
         }
     }
 
+    pub struct SwapDebugAndDisplay<T>(pub T) where T: std::fmt::Debug + std::fmt::Display;
+    impl<T> std::fmt::Debug for SwapDebugAndDisplay<T>  where T: std::fmt::Debug + std::fmt::Display{
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}", self.0)
+        }
+    }
+    impl<T> std::fmt::Display for SwapDebugAndDisplay<T>  where T: std::fmt::Debug + std::fmt::Display{
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result  {
+            write!(f, "{:?}", self.0)
+        }
+    }
     pub struct NonAllocatingFormatter<T>(pub T) where T: std::fmt::Display;
 
     impl<T> NonAllocatingFormatter<T> where T: std::fmt::Display {
@@ -732,7 +756,7 @@ impl CErrorProxy {
             ffi::flow_context_has_error(self.c_ctx)
         }
     }
-    pub fn status(&self) -> CStatus{
+    pub fn error(&self) -> CStatus{
         unsafe {
             CStatus::from(ffi::flow_context_error_reason(self.c_ctx))
         }
@@ -746,7 +770,7 @@ impl CErrorProxy {
         }
     }
     pub fn get(&self) -> CError {
-        let status = self.status();
+        let status = self.error();
 
         match status {
             CStatus::Cat(ErrorCategory::OutOfMemory) |
@@ -782,37 +806,40 @@ impl CErrorProxy{
             ffi::flow_context_clear_error(self.c_ctx)
         }
     }
-    /// # Expectations
-    ///
-    /// * Strings `message` and `function_name`, and `filename` should be null-terminated UTF-8 strings.
-    /// * The lifetime of `message` is expected to exceed the duration of this function call.
-    /// * The lifetime of `filename` and `function_name` (if provided), is expected to match or exceed the lifetime of `context`.
-    /// * You may provide a null value for `filename` or `function_name`, but for the love of puppies,
-    /// don't provide a dangling or invalid pointer, that will segfault... a long time later.
+
+    /// # Raises an error in the C context
     ///
     /// # Caveats
     ///
     /// * You cannot raise a second error until the first has been cleared with
     ///  `imageflow_context_clear_error`. You'll be ignored, as will future
     ///   `imageflow_add_to_callstack` invocations.
-    /// * If you provide an error code of zero (why?!), a different error code will be provided.
-    fn c_raise_error(&mut self,
-                         error_code: i32,
-                         message: Option<&CStr>,
-                         filename: Option<&'static CStr>,
-                         line: Option<i32>,
-                         function_name: Option<&'static CStr>)
-                         -> bool {
+    ///
+    /// * If you provide an error code of zero one will be substited for you.
+    ///
+    /// Returns None if the context already has an error
+    fn raise_error(&mut self, e: FlowError)
+                         -> Option<writing_to_slices::WriteResult> {
         unsafe {
-            ffi::flow_context_raise_error(self.c_ctx, error_code,
-                                          message.map(|cstr| cstr.as_ptr()).unwrap_or(ptr::null()),
-                                          filename.map(|cstr| cstr.as_ptr()).unwrap_or(ptr::null()),
-                                          line.unwrap_or(-1),
-                                          function_name.map(|cstr| cstr.as_ptr()).unwrap_or(ptr::null()))
+            let mut buffer_length: usize = 0;
+            let mut buffer: *mut u8 = ptr::null_mut();
+
+
+            if ffi::flow_context_set_error_get_message_buffer_info(self.c_ctx, e.category().to_c_error_code(), true, &mut buffer as *mut *mut u8, &mut buffer_length as *mut usize){
+                let formatter = writing_to_slices::NonAllocatingFormatter(writing_to_slices::SwapDebugAndDisplay(e));
+                Some(formatter.write_and_write_errors_to_cstring(buffer, buffer_length, Some("\n[truncated\n")))
+            }else{
+                None
+            }
         }
     }
 
-    fn c_add_to_callstack(&mut self,
+    ///
+    /// * Strings `function_name` and `filename` should be null-terminated UTF-8 strings.
+    /// * The lifetime of `filename` and `function_name` (if provided), is expected to match or exceed the lifetime of `context`.
+    /// * You may provide a null value for `filename` or `function_name`, but for the love of puppies,
+    /// don't provide a dangling or invalid pointer, that will segfault... a long time later.
+    fn add_to_callstack(&mut self,
                               filename: Option<&'static CStr>,
                               line: Option<i32>,
                               function_name: Option<&'static CStr>)

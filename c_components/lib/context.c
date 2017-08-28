@@ -64,7 +64,7 @@ char * flow_context_set_error_get_message_buffer(flow_c * context, flow_status_c
 
 // Returns true if the operation succeeded
 // Does not add to call stack
-bool flow_context_set_error_get_message_buffer_info(flow_c * context, flow_status_code code, char * * buffer,  size_t * buffer_size)
+bool flow_context_set_error_get_message_buffer_info(flow_c * context, flow_status_code code, bool status_included_in_buffer, char * * buffer,  size_t * buffer_size)
 {
     if (context->error.reason != flow_status_No_Error) {
         // The last error wasn't cleared, lock it down. We prefer the original error.
@@ -73,6 +73,7 @@ bool flow_context_set_error_get_message_buffer_info(flow_c * context, flow_statu
         *buffer_size = 0;
         return false;
     }else {
+        context->error.status_included_in_message = status_included_in_buffer;
         if (code == flow_status_No_Error) {
             context->error.reason = flow_status_Other_error;
         } else {
@@ -92,6 +93,7 @@ bool flow_context_add_to_callstack(flow_c * context, const char * file, int line
         context->error.callstack[context->error.callstack_count].line = line;
         context->error.callstack[context->error.callstack_count].function_name = function_name;
         context->error.callstack_count++;
+        context->error.status_included_in_message = false;
         return true;
     }
     return false;
@@ -105,6 +107,7 @@ void flow_context_clear_error(flow_c * context)
     context->error.callstack[0].function_name = NULL;
     context->error.reason = flow_status_No_Error;
     context->error.locked = false;
+    context->error.status_included_in_message = false;
     context->error.message[0] = 0;
 }
 
@@ -117,7 +120,7 @@ static const char * status_code_to_string(flow_status_code code)
         return "User defined error";
     }
     if (code >= flow_status_First_rust_error && code < flow_status_First_user_defined_error) {
-        return "rust";
+        return "Rust status code";
     }
     switch (code) {
         case 0:
@@ -205,23 +208,26 @@ int64_t flow_context_error_and_stacktrace(flow_c * context, char * buffer, size_
 
     return original_buffer_size - buffer_size;
 }
+bool flow_context_error_status_included_in_message(flow_c * context){
+    return context->error.status_included_in_message;
+}
 
 int64_t flow_context_error_message(flow_c * context, char * buffer, size_t buffer_size)
 {
     int chars_written = 0;
     const char * reason_str = status_code_to_string(context->error.reason);
-    if (strcmp(reason_str, "rust") == 0){
+    if (context->error.status_included_in_message){
         if (context->error.message[0] == 0) {
             // This branch shouldn't happen
-            chars_written = flow_snprintf(buffer, buffer_size, "rust error category %d - no message provided", (int)context->error.reason - 200);
+            chars_written = flow_snprintf(buffer, buffer_size, "CError of Rust Error %d - message missing", (int)context->error.reason - 200);
         } else {
             chars_written = flow_snprintf(buffer, buffer_size, "%s", context->error.message);
         }
     } else {
         if (context->error.message[0] == 0) {
-            chars_written = flow_snprintf(buffer, buffer_size, "%s(%d)", reason_str, context->error.reason);
+            chars_written = flow_snprintf(buffer, buffer_size, "%CError %d: %s", context->error.reason, reason_str);
         } else {
-            chars_written = flow_snprintf(buffer, buffer_size, "%s(%d) : %s", reason_str, context->error.reason,
+            chars_written = flow_snprintf(buffer, buffer_size, "%CError %d: %s : %s", context->error.reason,reason_str,
                                           context->error.message);
         }
     }

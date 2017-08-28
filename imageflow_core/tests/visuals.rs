@@ -14,7 +14,7 @@ extern crate twox_hash;
 use std::ffi::CString;
 use std::path::Path;
 
-use imageflow_core::{Context, JsonResponse, ErrorKind, NodeError, CodeLocation};
+use imageflow_core::{Context, JsonResponse, ErrorKind, FlowError, CodeLocation};
 
 fn default_build_config(debug: bool) -> s::Build001Config {
     s::Build001Config{graph_recording: match debug{ true => Some(s::Build001GraphRecording::debug_defaults()), false => None} ,

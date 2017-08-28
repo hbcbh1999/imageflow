@@ -39,16 +39,16 @@ impl NodeDebugInfo {
     }
 }
 
-impl NodeError{
-    fn add_node_info(mut self, info: Option<NodeDebugInfo>) -> NodeError{
+impl FlowError {
+    fn add_node_info(mut self, info: Option<NodeDebugInfo>) -> FlowError {
         self.node = info;
         self
     }
 
-    pub fn with_ctx(self, ctx: &OpCtx, ix: NodeIndex ) -> NodeError {
+    pub fn with_ctx(self, ctx: &OpCtx, ix: NodeIndex ) -> FlowError {
         self.add_node_info(NodeDebugInfo::from_ctx(ctx, ix))
     }
-    pub fn with_ctx_mut(self, ctx: &OpCtxMut, ix: NodeIndex ) -> NodeError {
+    pub fn with_ctx_mut(self, ctx: &OpCtxMut, ix: NodeIndex ) -> FlowError {
         self.add_node_info(NodeDebugInfo::from_ctx_mut(ctx, ix))
     }
 }

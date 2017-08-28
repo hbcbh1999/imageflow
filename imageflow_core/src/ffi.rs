@@ -717,9 +717,12 @@ mod mid_term {
 
         pub fn flow_context_error_reason(context: *mut ImageflowContext) -> i32;
 
+        pub fn flow_context_error_status_included_in_message(context: *mut ImageflowContext) -> bool;
+
         pub fn flow_context_set_error_get_message_buffer_info(context: *mut ImageflowContext,
-                                                     code: i32, // FlowStatusCode
-                                                     buffer_out: *mut *mut libc::c_char,
+                                                     code: i32,
+                                                              status_included_in_buffer: bool,
+                                                     buffer_out: *mut *mut u8,
                                                      buffer_size_out: *mut libc::size_t)
                                                      -> bool;
 
