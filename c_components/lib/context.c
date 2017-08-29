@@ -119,9 +119,6 @@ static const char * status_code_to_string(flow_status_code code)
     if (code >= flow_status_First_user_defined_error && code <= flow_status_Last_user_defined_error) {
         return "User defined error";
     }
-    if (code >= flow_status_First_rust_error && code < flow_status_First_user_defined_error) {
-        return "Rust status code";
-    }
     switch (code) {
         case 0:
             return "No error";
@@ -154,7 +151,11 @@ static const char * status_code_to_string(flow_status_code code)
         case 1024:
             return "Other error";
         default:
-            return "Unknown status code";
+            if (code >= flow_status_First_rust_error && code < flow_status_Other_error) {
+                return "Rust status code";
+            }else {
+                return "Unknown status code";
+            }
     }
 }
 
@@ -216,19 +217,25 @@ int64_t flow_context_error_message(flow_c * context, char * buffer, size_t buffe
 {
     int chars_written = 0;
     const char * reason_str = status_code_to_string(context->error.reason);
-    if (context->error.status_included_in_message){
-        if (context->error.message[0] == 0) {
-            // This branch shouldn't happen
-            chars_written = flow_snprintf(buffer, buffer_size, "CError of Rust Error %d - message missing", (int)context->error.reason - 200);
+    if (context->error.reason == flow_status_No_Error){
+        chars_written = flow_snprintf(buffer, buffer_size, "%s", reason_str);
+    }else {
+        if (context->error.status_included_in_message == true) {
+            if (context->error.message[0] == 0) {
+                // This branch shouldn't happen
+                chars_written = flow_snprintf(buffer, buffer_size, "CError of Rust Error %d - message missing",
+                                              (int)context->error.reason - 200);
+            } else {
+                chars_written = flow_snprintf(buffer, buffer_size, "%s", context->error.message);
+            }
         } else {
-            chars_written = flow_snprintf(buffer, buffer_size, "%s", context->error.message);
-        }
-    } else {
-        if (context->error.message[0] == 0) {
-            chars_written = flow_snprintf(buffer, buffer_size, "%CError %d: %s", context->error.reason, reason_str);
-        } else {
-            chars_written = flow_snprintf(buffer, buffer_size, "%CError %d: %s : %s", context->error.reason,reason_str,
-                                          context->error.message);
+            if (context->error.message[0] == 0) {
+                chars_written = flow_snprintf(buffer, buffer_size, "CError %d: %s", context->error.reason, reason_str);
+            } else {
+                chars_written = flow_snprintf(buffer, buffer_size, "CError %d: %s : %s", context->error.reason,
+                                              reason_str,
+                                              context->error.message);
+            }
         }
     }
     if (chars_written < 0) {
