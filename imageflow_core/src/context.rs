@@ -22,29 +22,32 @@ pub struct Context {
 impl Context {
 
     pub fn create() -> Result<Box<Context>>{
-        Context::abi_create_boxed()
+        Context::create_cant_panic()
     }
 
-    /// Used by abi; should not panic
-    pub fn abi_create_boxed() -> Result<Box<Context>> {
+    pub fn create_can_panic() -> Result<Box<Context>>{
+        let inner = unsafe { ffi::flow_context_create() };
+        if inner.is_null() {
+            Err(err_oom!())
+        } else {
+            Ok(Box::new(Context {
+                c_ctx: inner,
+                error: CErrorProxy::new(inner),
+                jobs: AddRemoveSet::with_capacity(2),
+                io_proxies: AddRemoveSet::with_capacity(2),
+                outward_error: OutwardErrorBuffer::new()
+            }))
+        }
+    }
+
+    pub fn create_cant_panic() -> Result<Box<Context>> {
         std::panic::catch_unwind(|| {
             // Upgrade backtraces
             // Disable backtraces for debugging across the FFI boundary
             //imageflow_helpers::debug::upgrade_panic_hook_once_if_backtraces_wanted();
 
-            let inner = unsafe { ffi::flow_context_create() };
-            if inner.is_null() {
-                Err(err_oom!())
-            } else {
-                Ok(Box::new(Context {
-                    c_ctx: inner,
-                    error: CErrorProxy::new(inner),
-                    jobs: AddRemoveSet::with_capacity(2),
-                    io_proxies: AddRemoveSet::with_capacity(2),
-                    outward_error: OutwardErrorBuffer::new()
-                }))
-            }
-        }).unwrap_or(Err(err_oom!()))
+            Context::create_can_panic()
+        }).unwrap_or(Err(err_oom!())) //err_oom because it doesn't allocate anything.
     }
 
 
@@ -54,6 +57,13 @@ impl Context {
         self.io_proxies.mut_clear();
         unsafe {
             ffi::flow_context_begin_terminate(self.c_ctx)
+        }
+    }
+    pub fn destroy(mut self) -> Result<()>{
+        if self.abi_begin_terminate(){
+            Ok(())
+        }else {
+            Err(cerror!(self,"Error encountered while terminating Context"))
         }
     }
 
@@ -71,12 +81,8 @@ impl Context {
         &self.error
     }
 
-    pub unsafe fn unsafe_c_context_pointer(&self) -> *mut ffi::ImageflowContext{
-        self.c_ctx
-    }
 
-
-    pub fn message(&mut self, method: &str, json: &[u8]) -> Result<JsonResponse> {
+    pub fn message(&mut self, method: &str, json: &[u8]) -> (JsonResponse, Result<()>) {
         ::context_methods::CONTEXT_ROUTER.invoke(self, method, json)
     }
 
@@ -87,7 +93,6 @@ impl Context {
     pub fn create_io_proxy(&self) -> RefMut<IoProxy>{
         self.io_proxies.add_mut(IoProxy::internal_use_only_create(self))
     }
-
 
     pub fn abi_try_remove_job(&self, job: *const Job) -> bool{
         self.jobs.try_remove(job).unwrap_or(false)
@@ -131,18 +136,7 @@ impl Context {
 
 
 
-    pub fn destroy_allowing_panics(mut self) {
-        if !self.abi_begin_terminate(){
-            cerror!(self,"Error during context shutdown").panic();
-        }
-    }
 
-
-
-    pub fn abi_destroy(mut self) -> bool{
-        self.jobs.mut_clear();
-        true
-    }
 
     pub fn build_1(&self, parsed: s::Build001) -> Result<s::ResponsePayload> {
         let mut g =::parsing::GraphTranslator::new().translate_framewise(parsed.framewise) ?;

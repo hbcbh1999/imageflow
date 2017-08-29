@@ -18,10 +18,10 @@ fn create_context_router() -> MethodRouter<'static, Context> {
     //    ));
     r.add_responder("v0.1/build",
                     Box::new(move |context: &mut Context, parsed: s::Build001| {
-                        context.build_1(parsed)
+                        context.build_1(parsed).map_err(|e| e.at(here!()))
                     }));
     r.add("brew_coffee",
-          Box::new(move |context: &mut Context, bytes: &[u8]| Ok(JsonResponse::teapot())));
+          Box::new(move |context: &mut Context, bytes: &[u8]| (JsonResponse::teapot(), Ok(()))));
     r
 }
 

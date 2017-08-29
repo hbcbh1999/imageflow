@@ -70,11 +70,11 @@ fn test_err() {
 
     let e = nerror!(::ErrorKind::BitmapPointerNull);
     assert_eq!(e.kind, ::ErrorKind::BitmapPointerNull);
-    assert!(format!("{}",&e).starts_with("FlowError BitmapPointerNull at"));
+    assert!(format!("{}",&e).starts_with("InternalError: BitmapPointerNull at"));
     let e = nerror!(::ErrorKind::BitmapPointerNull, "hi");
-    assert!(format!("{}",&e).starts_with("FlowError BitmapPointerNull: hi at"));
+    assert!(format!("{}",&e).starts_with("InternalError: BitmapPointerNull: hi at"));
     let e = nerror!(::ErrorKind::BitmapPointerNull, "hi {}", 1);
-    assert!(format!("{}",&e).starts_with("FlowError BitmapPointerNull: hi 1 at"));
+    assert!(format!("{}",&e).starts_with("InternalError: BitmapPointerNull: hi 1 at"));
 }
 
 pub struct NodeDefHelpers {}

@@ -187,8 +187,8 @@ bool imageflow_json_response_destroy(void* context, void* response);
 ///
 /// You should call `imageflow_context_has_error()` to see if this succeeded.
 ///
-/// A void is returned unless you provide invalid arguments or there is an out-of-memory
-/// condition. Call `imageflow_json_response_destroy` when you're done with it (or dispose the context).
+/// A void is returned for success and most error conditions.
+/// Call `imageflow_json_response_destroy` when you're done with it (or dispose the context).
 ///
 /// Behavior is undefined if `context` is a dangling or invalid ptr; segfault likely.
 void const* imageflow_context_send_json(void* context, char const* method, uint8_t const* json_buffer, size_t json_buffer_size);
@@ -207,8 +207,8 @@ void const* imageflow_context_send_json(void* context, char const* method, uint8
 ///
 /// You should call `imageflow_context_has_error()` to see if this succeeded.
 ///
-/// A void is returned unless you provide invalid arguments or there is an out-of-memory
-/// condition. Call `imageflow_json_response_destroy` when you're done with it (or dispose the context).
+/// A void is returned for success and most error conditions.
+/// Call `imageflow_json_response_destroy` when you're done with it (or dispose the context).
 ///
 /// Behavior is undefined if `context` is a dangling or invalid ptr; segfault likely.
 void const* imageflow_job_send_json(void* context, void* job, char const* method, uint8_t const* json_buffer, size_t json_buffer_size);

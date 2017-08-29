@@ -82,7 +82,11 @@ macro_rules! cerror {
         let cerr = $context.c_error().require();
         ::FlowError{
             kind: ::ErrorKind::CError(cerr.status()),
-            message: format!(concat!($fmt, ": {}"), cerr.into_string()),
+            message: if cerr.is_oom() {
+                        cerr.into_string()
+                     }else {
+                        format!(concat!($fmt, ": {}"), cerr.into_string())
+                     },
             at: ::smallvec::SmallVec::new(),
             node:None
         }.at(here ! ())
@@ -91,7 +95,11 @@ macro_rules! cerror {
         let cerr = $context.c_error().require();
         ::FlowError{
             kind: ::ErrorKind::CError(cerr.status()),
-            message: format!(concat!($fmt, ": {}"), $($arg)*, cerr.into_string()),
+            message: if cerr.is_oom() {
+                        cerr.into_string()
+                     }else {
+                        format!(concat!($fmt, ": {}"), $($arg)*, cerr.into_string())
+                     },
             at: ::smallvec::SmallVec::new(),
             node:None
         }.at(here ! ())
@@ -129,6 +137,7 @@ pub enum ErrorKind{
     InvalidArgument,
     InvalidCoordinates,
     InvalidNodeParams,
+    InvalidMessageEndpoint,
 
     FailedBorrow,
     NodeParamsMismatch,
@@ -150,6 +159,7 @@ impl CategorizedError for ErrorKind{
             &ErrorKind::NullArgument |
             &ErrorKind::InvalidArgument |
             &ErrorKind::InvalidCoordinates |
+            &ErrorKind::InvalidMessageEndpoint |
             &ErrorKind::InvalidNodeParams => ErrorCategory::ArgumentInvalid,
             &ErrorKind::FailedBorrow |
             &ErrorKind::NodeParamsMismatch |
@@ -167,6 +177,10 @@ impl ErrorKind{
     pub fn cat(&self) -> ErrorCategory{
         self.category()
     }
+    pub fn is_oom(&self) -> bool{
+        self.category() == ErrorCategory::OutOfMemory
+    }
+
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -192,8 +206,13 @@ impl ::std::error::Error for FlowError {
 impl FlowError {
 
     pub fn at(mut self, c: CodeLocation ) -> FlowError {
-        self.at.push(c);
-        self
+        // Prevent allocations when the error is OOM
+        if self.kind.is_oom() && self.at.len() == self.at.capacity(){
+            self
+        }else {
+            self.at.push(c);
+            self
+        }
     }
     pub fn recoverable(&self) -> bool{
         false
@@ -206,6 +225,15 @@ impl FlowError {
     pub fn panic(&self) -> !{
         eprintln!("{}", self);
         panic!(format!("{}", self));
+    }
+    pub fn from_serde(e: ::serde_json::Error, json_bytes: &[u8]) -> FlowError{
+        //TODO: improve, potentially?
+        FlowError{
+            kind: ErrorKind::Category(ErrorCategory::JsonMalformed),
+            at: ::smallvec::SmallVec::new(),
+            node: None,
+            message: format!("Json Error: {}", &e)
+        }
     }
 }
 
@@ -243,6 +271,7 @@ impl fmt::Debug for FlowError {
         Ok(())
     }
 }
+
 
 #[repr(C)]
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
@@ -459,14 +488,7 @@ impl OutwardErrorBuffer{
     }
 }
 
-fn format_panic_value(e: &Any, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-    if let Some(str) = e.downcast_ref::<String>(){
-        write!(f, "panicked: {}\n",str)?;
-    }else if let Some(str) = e.downcast_ref::<&str>(){
-        write!(f, "panicked: {}\n",str)?;
-    }
-    Ok(())
-}
+
 
 impl std::fmt::Display for OutwardErrorBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -478,7 +500,7 @@ impl std::fmt::Display for OutwardErrorBuffer {
         }
 
         if let Some(ref panic) = self.last_panic{
-            format_panic_value(panic,f)?;
+            write!(f, "{}", PanicFormatter(panic))?;
         }
         if let Some(ref error) = self.last_error{
             writeln!(f, "{:?}", error)?;
@@ -512,6 +534,9 @@ impl CError{
     }
     pub fn from_status(status: CStatus) -> CError{
         CError{ status: status, message_and_stack: String::new()}
+    }
+    pub fn is_oom(&self) -> bool{
+        self.status == CStatus::Cat(ErrorCategory::OutOfMemory)
     }
 
 }
@@ -557,7 +582,17 @@ impl CStatus {
     }
 }
 
-
+pub struct PanicFormatter<'a>(pub &'a Any);
+impl<'a> std::fmt::Display for PanicFormatter<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if let Some(str) = self.0.downcast_ref::<String>() {
+            write!(f, "panicked: {}\n", str)?;
+        } else if let Some(str) = self.0.downcast_ref::<&str>() {
+            write!(f, "panicked: {}\n", str)?;
+        }
+        Ok(())
+    }
+}
 
 
 
