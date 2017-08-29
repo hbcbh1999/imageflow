@@ -100,22 +100,30 @@ impl IoProxy {
     }
 
     pub fn read_to_buffer(&self, context: &Context, buffer: &mut [u8]) -> Result<i64> {
-        //TODO: return result for read failure instead of panicking.
         // Return result for missing function instead of panicking.
         let read = self.classic_io().unwrap().read_fn.unwrap()(context.flow_c(), self.classic, buffer.as_mut_ptr(), buffer.len());
         if read < buffer.len() as i64{
-            Err(cerror!(context))
+            if context.c_error().has_error() {
+                Err(cerror!(context))
+            }else{
+                Ok(read)
+            }
+
         } else {
             Ok(read)
         }
 
     }
     pub fn write_from_buffer(&self, context: &Context, buffer: &[u8]) -> Result<i64> {
-        //TODO: return result for read failure instead of panicking.
         // Return result for missing function instead of panicking.
         let read = self.classic_io().unwrap().write_fn.unwrap()(context.flow_c(), self.classic, buffer.as_ptr(), buffer.len());
         if read < buffer.len() as i64{
-            Err(cerror!(context))
+            if context.c_error().has_error() {
+                Err(cerror!(context))
+            }else{
+                Ok(read)
+            }
+
         } else {
             Ok(read)
         }
@@ -123,7 +131,6 @@ impl IoProxy {
     }
 
     pub fn seek(&self, context: &Context, position: i64) -> Result<bool> {
-        //TODO: return result for read failure instead of panicking.
         // Return result for missing function instead of panicking.
         let success = self.classic_io().unwrap().seek_fn.unwrap()(context.flow_c(), self.classic, position);
         Ok(success)
